@@ -1,0 +1,8 @@
+{
+  "uuid": "net-toggle",
+  "name": "Network Toggle",
+  "description": "Toggle between WiFi networks The Flying Dutchman and port",
+  "shell-version": ["46","47","48","49"],
+  "version": 1
+}
+

@@ -1,0 +1,57 @@
+.net-toggle-button {
+    font-weight: bold;
+    color: white;
+}
+
+.net-toggle-button.blue {
+    color: blue;
+}
+
+.net-toggle-button.orange {
+    color: orange;
+}
+
+.net-toggle-button.green {
+    color: green;
+}
+
+.net-toggle-button.red {
+    color: red;
+}
+
+.net-toggle-button.purple {
+    color: purple;
+}
+
+.net-toggle-button.yellow {
+    color: yellow;
+}
+
+.net-toggle-menu-item {
+    color: white;
+}
+
+.net-toggle-menu-item.blue {
+    color: blue;
+}
+
+.net-toggle-menu-item.orange {
+    color: orange;
+}
+
+.net-toggle-menu-item.green {
+    color: green;
+}
+
+.net-toggle-menu-item.red {
+    color: red;
+}
+
+.net-toggle-menu-item.purple {
+    color: purple;
+}
+
+.net-toggle-menu-item.yellow {
+    color: yellow;
+}
+
