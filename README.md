@@ -41,29 +41,31 @@ BackupConnection:cyan
 
 ### Method 1: Copy Files
 ```bash
-mkdir -p ~/.local/share/gnome-shell/extensions/net-toggle@rob
-cp extension.js metadata.json styles.css ~/.local/share/gnome-shell/extensions/net-toggle@rob/
+mkdir -p ~/.local/share/gnome-shell/extensions/network-toggler
+cp extension.js metadata.json styles.css ~/.local/share/gnome-shell/extensions/network-toggler/
 ```
 
 ### Method 2: Symbolic Link (Development)
 ```bash
-ln -sf $(pwd) ~/.local/share/gnome-shell/extensions/net-toggle@rob
+ln -sf $(pwd) ~/.local/share/gnome-shell/extensions/network-toggler
 ```
+
+**Note**: After creating the symbolic link, you must log out and log back in for GNOME Shell to detect the extension, then enable it.
 
 ## Enabling the Extension
 
-After installation, enable the extension:
+After installation (and logout/login for symbolic link method), enable the extension:
 
 ```bash
 # Enable the extension
-gnome-extensions enable net-toggle@rob
+gnome-extensions enable network-toggler
 
 # Restart GNOME Shell (X11 only - not needed on Wayland)
 # On X11: Alt + F2, type 'r', press Enter
-# On Wayland: log out and log back in, or restart session
+# On Wayland: log out and log back in (required for new extensions)
 
 # Verify it's enabled
-gnome-extensions list --enabled | grep net-toggle
+gnome-extensions list --enabled | grep network-toggler
 ```
 
 ## Requirements
