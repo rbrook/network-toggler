@@ -1,41 +1,51 @@
-TODO: use this endpoint to query ASN provider/IP every minutes and on network change: https://ifconfig.co/asn-org https://ifconfig.co/city
+# Network Toggler - GNOME Shell Extension
 
-# Network Toggle - GNOME Shell Extension
-
-A GNOME Shell extension that provides quick WiFi network switching with visual color indicators. Compatible with Wayland and GNOME Shell versions 46-49.
+A GNOME Shell extension that provides quick WiFi network switching with geolocation info and visual color indicators. Compatible with Wayland and GNOME Shell versions 46-49.
 
 ## Features
 
-- **Top Bar Widget**: Shows current WiFi network with wireless icon (🛜) in the top status bar
-- **Color-Coded Networks**: Each network displays in a predefined color for easy identification
-- **Hover Dropdown**: Hover over the widget to see a dropdown menu with all configured networks
+- **Geolocation Widget**: Shows country code, ISP provider, IP address (abbreviated IPv6), and current WiFi network
+- **Color-Coded Display**: Each element (country, ISP, IP, network) displays in predefined colors for easy identification
+- **Smart Dropdown**: First line shows full connection details (non-clickable), followed by clickable network options
 - **One-Click Toggle**: Left-click to cycle through networks sequentially
 - **Click-to-Switch**: Click any network in the dropdown to connect immediately
-- **Auto-Update**: Automatically detects network changes and updates the display
-- **Configuration Reload**: Automatically reloads network configuration every 30 seconds
+- **Real-Time Updates**: Automatically detects network changes via NetworkManager D-Bus and updates geolocation info
+- **Configuration Reload**: Automatically reloads configuration on every network change
 
 ## Configuration
 
-The extension reads network configurations from `~/.networks`. Each line should contain:
-```
-NetworkName:color
+The extension reads configurations from `~/.networks.yaml` with four sections: networks, countries, IPs, and asn_orgs.
+
+Example `~/.networks.yaml` file:
+```yaml
+networks:
+  HomeWiFi: cyan
+  OfficeNetwork: orange
+  CafeWiFi: blue
+  #DisabledNetwork: red
+
+countries:
+  US: orange
+  DE: blue
+  JP: green
+
+IPs:
+  "2001:db8:85a3::8a2e:370:7334": green
+  192.168.1.100: yellow
+
+asn_orgs:
+  "Example Telecommunications Corp": purple
+  "Global Internet Provider Ltd": orange
 ```
 
-Example `~/.networks` file:
-```
-# WiFi networks and their display colors
-HomeWiFi:blue
-OfficeNetwork:orange
-PublicWiFi:red
-MobileHotspot:green
-CafeWiFi:purple
-GuestNetwork:yellow
-BackupConnection:cyan
-```
-
+**Configuration Details:**
+- **networks**: WiFi networks with their display colors
+- **countries**: Country ISO codes (US, DE, JP, etc.) with colors  
+- **IPs**: Specific IP addresses with colors (use quotes for IPv6)
+- **asn_orgs**: ISP/ASN organization names with colors (use quotes for names with special characters)
 - Lines starting with `#` are ignored (comments)
-- Any CSS color name or hex value is supported (e.g., blue, #FF5733, rgba(255,0,0,0.5))
-- Networks without color configuration default to white
+- Any CSS color name is supported (blue, orange, purple, cyan, etc.)
+- Elements without color configuration default to white
 
 ## Installation
 
@@ -76,19 +86,23 @@ gnome-extensions list --enabled | grep network-toggler
 
 ## How It Works
 
-- **Display**: Shows current WiFi network name with wireless icon in configurable color
-- **Hover Menu**: Hover to see dropdown with all configured networks in their assigned colors
-- **Left Click**: Cycles through networks in order they appear in `~/.networks`
+- **Widget Display**: Shows `Country | ISP | IP | Network` with wireless icon, each element colored per YAML config
+- **IPv6 Abbreviation**: Long IPv6 addresses shown as `...last4` in widget (full IP in dropdown)
+- **Smart Dropdown**: First line shows full connection details (non-clickable), separator, then clickable networks
+- **Left Click**: Cycles through networks in order they appear in YAML networks section
 - **Menu Click**: Directly connects to selected network
 - **Network Detection**: Uses NetworkManager D-Bus signals to detect network changes
+- **Geolocation Updates**: Fetches location data from ifconfig.co/json on network changes
 - **Command Execution**: Uses `nmcli con up "NetworkName"` to switch networks
 
 ## Troubleshooting
 
 1. **Extension not appearing**: Ensure GNOME Shell version is 46-49 and extension is enabled
 2. **Networks not switching**: Verify NetworkManager is running and `nmcli` command works
-3. **Colors not showing**: Check `~/.networks` file format and color syntax
-4. **Menu not responding**: Try disabling and re-enabling the extension
+3. **Colors not showing**: Check `~/.networks.yaml` file format and YAML syntax
+4. **Geolocation not updating**: Verify internet connectivity and ifconfig.co accessibility
+5. **Menu not responding**: Try disabling and re-enabling the extension
+6. **IPv6 parsing issues**: Use quotes around IPv6 addresses in the IPs section
 
 ## Files Structure
 

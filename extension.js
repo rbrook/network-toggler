@@ -10,74 +10,241 @@ import Gio from 'gi://Gio';
 
 let networkConfigs = new Map();
 let networkNames = [];
+let countryConfigs = new Map();
+let ipConfigs = new Map();
+let asnOrgConfigs = new Map();
+let currentCountryCode = "";
+let currentIP = "";
+let currentAsnOrg = "";
+
+function fetchLocationInfo() {
+    console.log('Fetching location info...');
+    try {
+        let [ok, out] = GLib.spawn_command_line_sync('curl -s ifconfig.co/json');
+        if (ok) {
+            let jsonData = JSON.parse(out.toString().trim());
+            let newCountry = jsonData.country_iso || "";
+            let newIP = jsonData.ip || "";
+            let newAsnOrg = jsonData.asn_org || "";
+            
+            console.log(`Location update: ${currentCountryCode}->${newCountry}, ${currentIP}->${newIP}, ${currentAsnOrg}->${newAsnOrg}`);
+            
+            currentCountryCode = newCountry;
+            currentIP = newIP;
+            currentAsnOrg = newAsnOrg;
+            return true;
+        }
+    } catch (e) {
+        console.log('Location info fetch failed:', e);
+    }
+    return false;
+}
 
 function loadNetworkConfigs() {
+    console.log('Loading network configs from ~/.networks.yaml');
     try {
-        let [ok, data] = GLib.file_get_contents('/home/rob/.networks');
+        let filePath = GLib.get_home_dir() + '/.networks.yaml';
+        console.log(`Attempting to read: ${filePath}`);
+        let file = Gio.File.new_for_path(filePath);
+        let [ok, data] = file.load_contents(null);
+        console.log('File read result:', ok);
         if (ok) {
             networkConfigs.clear();
             networkNames = [];
-            new TextDecoder().decode(data).trim().split('\n').forEach(line => {
+            countryConfigs.clear();
+            ipConfigs.clear();
+            asnOrgConfigs.clear();
+            
+            let content = new TextDecoder().decode(data).trim();
+            let lines = content.split('\n');
+            let currentSection = null;
+            
+            lines.forEach(line => {
+                let originalLine = line;
                 line = line.trim();
-                if (line && !line.startsWith('#')) {
-                    let [name, color] = line.split(':');
-                    if (name && color) {
-                        networkConfigs.set(name, color.trim());
-                        networkNames.push(name);
+                
+                if (!line || line.startsWith('#') || originalLine.trim().startsWith('#')) {
+                    return;
+                }
+                
+                // Check for section headers (case insensitive)
+                let lowerLine = line.toLowerCase();
+                if (lowerLine === 'networks:') {
+                    currentSection = 'networks';
+                    return;
+                } else if (lowerLine === 'countries:') {
+                    currentSection = 'countries';
+                    return;
+                } else if (lowerLine === 'ips:') {
+                    currentSection = 'ips';
+                    return;
+                } else if (lowerLine === 'asn_orgs:') {
+                    currentSection = 'asn_orgs';
+                    return;
+                }
+                
+                // Parse entries (must be indented and in a valid section)
+                if (currentSection && originalLine.startsWith(' ')) {
+                    let cleanLine = line.replace(/^\s+/, '');
+                    // Handle quoted keys (for IPv6 addresses with colons)
+                    let colonIndex = -1;
+                    let inQuotes = false;
+                    for (let i = 0; i < cleanLine.length; i++) {
+                        if (cleanLine[i] === '"') {
+                            inQuotes = !inQuotes;
+                        } else if (cleanLine[i] === ':' && !inQuotes) {
+                            colonIndex = i;
+                            break;
+                        }
                     }
+                    
+                    if (colonIndex > 0) {
+                        let name = cleanLine.substring(0, colonIndex).trim();
+                        let color = cleanLine.substring(colonIndex + 1).trim();
+                        
+                        // Remove surrounding quotes from name if present
+                        if (name.startsWith('"') && name.endsWith('"')) {
+                            name = name.slice(1, -1);
+                        }
+                        
+                        if (name && color) {
+                            if (currentSection === 'networks') {
+                                networkConfigs.set(name, color);
+                                networkNames.push(name);
+                                console.log(`Loaded network: ${name} -> ${color}`);
+                            } else if (currentSection === 'countries') {
+                                countryConfigs.set(name, color);
+                                console.log(`Loaded country: ${name} -> ${color}`);
+                            } else if (currentSection === 'ips') {
+                                ipConfigs.set(name, color);
+                                console.log(`Loaded IP: ${name} -> ${color}`);
+                            } else if (currentSection === 'asn_orgs') {
+                                asnOrgConfigs.set(name, color);
+                                console.log(`Loaded ASN Org: ${name} -> ${color}`);
+                            }
+                        }
+                    }
+                } else if (currentSection && !line.startsWith(' ')) {
+                    currentSection = null;
                 }
             });
         }
-    } catch (e) {}
+    } catch (e) {
+        console.log('YAML loading failed:', e);
+    }
+    
+    console.log(`Config loading complete. Networks: ${networkNames.length}, Countries: ${countryConfigs.size}, IPs: ${ipConfigs.size}`);
+    
+    // Simple debug - change test label to show loaded count
+    global.networkCount = networkNames.length;
 }
 
 const NetworkToggle = GObject.registerClass(
 class NetworkToggle extends PanelMenu.Button {
     _init() {
-        super._init(0.0, "Network Toggle", false); // false = don't create default menu
+        super._init(0.0, "Network Toggle");
 
         loadNetworkConfigs();
-        
+
         this.label = new St.Label({
-            text: "WiFi",
+            text: "🛜 WiFi",
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.add_child(this.label);
 
-        this.connect('button-press-event', (actor, event) => {
-            if (event.get_button() === 1) { // Left click only
-                this._toggleNetwork();
-                this.menu.close(); // Close menu after network toggle
-            }
-            return true; // Always consume events to prevent default menu behavior
-        });
+        this._lastKnownNetwork = "WiFi";
         
-        // Show menu on hover
-        this.connect('enter-event', () => {
-            this._clearCloseTimer();
-            this.menu.open();
-            this._startHoverCheck();
-        });
+        // Initial location fetch
+        fetchLocationInfo();
         
-        this.connect('leave-event', () => {
-            this._startHoverCheck();
-        });
-
-        this._lastKnownNetwork = networkNames[0] || "WiFi";
         this._updateLabel();
         this._createMenu();
         
         // Watch for network changes via D-Bus
         this._setupNetworkWatcher();
-        
-        // Reload config every 30 seconds
-        this._configTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
-            loadNetworkConfigs();
-            this._updateMenu();
-            return true;
-        });
     }
-
+    
+    _getCurrentNetwork() {
+        try {
+            let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f active,ssid dev wifi');
+            if (ok) {
+                let activeLine = out.toString().split('\n').find(line => line.startsWith('yes:'));
+                if (activeLine) {
+                    let network = activeLine.substring(4).trim();
+                    this._lastKnownNetwork = network;
+                    return network;
+                }
+            }
+        } catch (e) {}
+        return this._lastKnownNetwork;
+    }
+    
+    _updateLabel() {
+        let current = this._getCurrentNetwork();
+        let networkColor = networkConfigs.get(current) || "white";
+        let textPart = current || "WiFi";
+        
+        // Build location part with individual colors
+        let locationPart = "";
+        if (currentCountryCode && currentAsnOrg && currentIP) {
+            let countryColor = countryConfigs.get(currentCountryCode) || "white";
+            let asnOrgColor = asnOrgConfigs.get(currentAsnOrg) || "white";
+            let ipColor = ipConfigs.get(currentIP) || "white";
+            let asnOrgFirstWord = currentAsnOrg.split(/[\s-]+/)[0];
+            
+            // Abbreviate IPv6 addresses for the widget display only
+            let displayIP = currentIP;
+            if (currentIP.includes(':') && currentIP.length > 15) {
+                let lastPart = currentIP.split(':').pop();
+                displayIP = `...${lastPart}`;
+            }
+            
+            locationPart = `<span color="${countryColor}">${currentCountryCode}</span> | <span color="${asnOrgColor}">${asnOrgFirstWord}</span> | <span color="${ipColor}">${displayIP}</span> `;
+        } else if (currentCountryCode && currentIP) {
+            let countryColor = countryConfigs.get(currentCountryCode) || "white";
+            let ipColor = ipConfigs.get(currentIP) || "white";
+            
+            // Abbreviate IPv6 addresses for the widget display only
+            let displayIP = currentIP;
+            if (currentIP.includes(':') && currentIP.length > 15) {
+                let lastPart = currentIP.split(':').pop();
+                displayIP = `...${lastPart}`;
+            }
+            
+            locationPart = `<span color="${countryColor}">${currentCountryCode}</span> | <span color="${ipColor}">${displayIP}</span> `;
+        } else if (currentCountryCode) {
+            let countryColor = countryConfigs.get(currentCountryCode) || "white";
+            locationPart = `<span color="${countryColor}">${currentCountryCode}</span> `;
+        } else if (currentIP) {
+            let ipColor = ipConfigs.get(currentIP) || "white";
+            
+            // Abbreviate IPv6 addresses for the widget display only
+            let displayIP = currentIP;
+            if (currentIP.includes(':') && currentIP.length > 15) {
+                let lastPart = currentIP.split(':').pop();
+                displayIP = `...${lastPart}`;
+            }
+            
+            locationPart = `<span color="${ipColor}">${displayIP}</span> `;
+        }
+        
+        let markup = `${locationPart}<span alpha="50%">🛜</span> <span color="${networkColor}">${textPart}</span>`;
+        this.label.clutter_text.set_markup(markup);
+        this.label.set_style(`font-weight: bold;`);
+    }
+    
+    _getFullConnectionInfo() {
+        let current = this._getCurrentNetwork();
+        let parts = [];
+        
+        if (currentCountryCode) parts.push(currentCountryCode);
+        if (currentAsnOrg) parts.push(currentAsnOrg);
+        if (currentIP) parts.push(currentIP);
+        parts.push(current || "WiFi");
+        
+        return parts.join(' • ');
+    }
+    
     _setupNetworkWatcher() {
         try {
             this._nmProxy = Gio.DBusProxy.new_for_bus_sync(
@@ -96,83 +263,48 @@ class NetworkToggle extends PanelMenu.Button {
                         this._updateLabel();
                         return false;
                     });
-                }
-            });
-            
-            // Also watch for device state changes
-            this._deviceProxy = Gio.DBusProxy.new_for_bus_sync(
-                Gio.BusType.SYSTEM,
-                Gio.DBusProxyFlags.NONE,
-                null,
-                'org.freedesktop.NetworkManager',
-                '/org/freedesktop/NetworkManager',
-                'org.freedesktop.NetworkManager',
-                null
-            );
-            
-            this._deviceStateId = this._deviceProxy.connect('g-signal', (proxy, sender, signal, params) => {
-                if (signal === 'DeviceAdded' || signal === 'DeviceRemoved') {
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+                    // Reload configuration and fetch new location info after network change
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
+                        console.log('Network changed - reloading configuration');
+                        loadNetworkConfigs();
+                        this._createMenu(); // Update menu with new config
+                        fetchLocationInfo();
                         this._updateLabel();
                         return false;
                     });
                 }
             });
-            
         } catch (e) {
-            console.log('NetworkManager D-Bus setup failed:', e);
+            // Silent fallback if NetworkManager unavailable
         }
     }
-
-    _clearCloseTimer() {
-        if (this._closeTimer) {
-            GLib.source_remove(this._closeTimer);
-            this._closeTimer = null;
-        }
-    }
-
-    _startHoverCheck() {
-        this._clearCloseTimer();
-        this._closeTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            if (!this._isMouseOverWidget()) {
-                this.menu.close();
-                this._closeTimer = null;
-                return false;
-            }
-            return true; // Keep checking
-        });
-    }
-
-    _isMouseOverWidget() {
-        let [x, y] = global.get_pointer();
-        
-        // Check if over button
-        let [buttonX, buttonY] = this.get_transformed_position();
-        let [buttonW, buttonH] = this.get_transformed_size();
-        if (x >= buttonX && x <= buttonX + buttonW && y >= buttonY && y <= buttonY + buttonH) {
-            return true;
-        }
-        
-        // Check if over menu
-        if (this.menu.isOpen) {
-            let menuActor = this.menu.actor;
-            let [menuX, menuY] = menuActor.get_transformed_position();
-            let [menuW, menuH] = menuActor.get_transformed_size();
-            if (x >= menuX && x <= menuX + menuW && y >= menuY && y <= menuY + menuH) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
+    
     _createMenu() {
         this.menu.removeAll();
+        
+        // Add connection info as first non-clickable item
+        let connectionInfo = this._getFullConnectionInfo();
+        let infoItem = new PopupMenu.PopupMenuItem(connectionInfo);
+        infoItem.label.set_style(`color: lightgray; font-size: 14px; font-weight: normal;`);
+        infoItem.setSensitive(false);
+        this.menu.addMenuItem(infoItem);
+        
+        if (networkNames.length === 0) {
+            // No networks configured - show informational message
+            let item = new PopupMenu.PopupMenuItem("No networks configured");
+            item.label.set_style(`color: gray; font-style: italic;`);
+            item.setSensitive(false); // Make it unclickable
+            this.menu.addMenuItem(item);
+            return;
+        }
+        
+        // Add separator
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
         for (let network of networkNames) {
             let item = new PopupMenu.PopupMenuItem(network);
             let color = networkConfigs.get(network) || "white";
-            item.label.set_style(`color: ${color};`);
+            item.label.set_style(`color: ${color}; font-size: 16px; font-weight: bold;`);
             
             item.connect('activate', () => {
                 this._switchToNetwork(network);
@@ -181,72 +313,18 @@ class NetworkToggle extends PanelMenu.Button {
             this.menu.addMenuItem(item);
         }
     }
-
-    _updateMenu() {
-        this._createMenu();
-    }
-
+    
     _switchToNetwork(network) {
-        this._lastKnownNetwork = network;
         GLib.spawn_command_line_async(`nmcli con up "${network}"`);
-        this._updateLabel();
-        this.menu.close(); // Close menu after selection
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
-            this._updateLabel();
-            return false;
-        });
+        this.menu.close();
+        // Let D-Bus monitoring handle the label update when network actually changes
     }
-
-    _getCurrentNetwork() {
-        try {
-            let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f active,ssid dev wifi');
-            if (ok) {
-                let activeLine = out.toString().split('\n').find(line => line.startsWith('yes:'));
-                if (activeLine) {
-                    let network = activeLine.substring(4).trim();
-                    this._lastKnownNetwork = network;
-                    return network;
-                }
-            }
-        } catch (e) {}
-        return this._lastKnownNetwork;
-    }
-
-    _toggleNetwork() {
-        let current = this._getCurrentNetwork();
-        let nextIndex = (networkNames.indexOf(current) + 1) % networkNames.length;
-        let target = networkNames[nextIndex] || networkNames[0];
-        
-        this._lastKnownNetwork = target;
-        GLib.spawn_command_line_async(`nmcli con up "${target}"`);
-        this._updateLabel();
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => (this._updateLabel(), false));
-    }
-
-    _updateLabel() {
-        let current = this._getCurrentNetwork();
-        let color = networkConfigs.get(current) || "white";
-        let textPart = current || "WiFi";
-        
-        // Use wireless symbol with half transparency
-        let markup = `<span alpha="50%">🛜</span> ${textPart}`;
-        this.label.clutter_text.set_markup(markup);
-        this.label.set_style(`font-weight: bold; color: ${color};`);
-    }
-
+    
     destroy() {
-        this._configTimer && GLib.source_remove(this._configTimer);
-        this._closeTimer && GLib.source_remove(this._closeTimer);
-        
         if (this._nmProxy && this._stateChangedId) {
             this._nmProxy.disconnect(this._stateChangedId);
         }
-        if (this._deviceProxy && this._deviceStateId) {
-            this._deviceProxy.disconnect(this._deviceStateId);
-        }
-        
         this._nmProxy = null;
-        this._deviceProxy = null;
         super.destroy();
     }
 });
@@ -262,4 +340,3 @@ export default class NetToggleExtension extends Extension {
         this.networkToggle = null;
     }
 }
-
