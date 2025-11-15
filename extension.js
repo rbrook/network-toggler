@@ -265,14 +265,15 @@ class NetworkToggle extends PanelMenu.Button {
             );
             
             this._stateChangedId = this._nmProxy.connect('g-signal', (proxy, sender, signal, params) => {
-                if (signal === 'StateChanged') {
+                if (signal === 'StateChanged' || signal === 'DeviceAdded' || signal === 'DeviceRemoved') {
+                    console.log(`Network event detected: ${signal}`);
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
                         this._updateLabel();
                         return false;
                     });
                     // Reload configuration and fetch new location info after network change
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
-                        console.log('Network changed - reloading configuration');
+                        console.log('Network changed - reloading configuration and geolocation');
                         loadNetworkConfigs(this.extensionDir);
                         this._createMenu(); // Update menu with new config
                         fetchLocationInfo();
@@ -281,6 +282,33 @@ class NetworkToggle extends PanelMenu.Button {
                     });
                 }
             });
+            
+            // Also monitor active connections for VPN changes
+            try {
+                this._connectionsProxy = Gio.DBusProxy.new_for_bus_sync(
+                    Gio.BusType.SYSTEM,
+                    Gio.DBusProxyFlags.NONE,
+                    null,
+                    'org.freedesktop.NetworkManager',
+                    '/org/freedesktop/NetworkManager/Settings',
+                    'org.freedesktop.NetworkManager.Settings',
+                    null
+                );
+                
+                this._connectionChangedId = this._connectionsProxy.connect('g-signal', (proxy, sender, signal, params) => {
+                    if (signal === 'NewConnection' || signal === 'ConnectionRemoved') {
+                        console.log(`Connection event detected: ${signal}`);
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
+                            console.log('Connection changed - updating geolocation');
+                            fetchLocationInfo();
+                            this._updateLabel();
+                            return false;
+                        });
+                    }
+                });
+            } catch (e) {
+                console.log('Failed to setup connection monitoring:', e);
+            }
         } catch (e) {
             // Silent fallback if NetworkManager unavailable
         }
@@ -331,7 +359,11 @@ class NetworkToggle extends PanelMenu.Button {
         if (this._nmProxy && this._stateChangedId) {
             this._nmProxy.disconnect(this._stateChangedId);
         }
+        if (this._connectionsProxy && this._connectionChangedId) {
+            this._connectionsProxy.disconnect(this._connectionChangedId);
+        }
         this._nmProxy = null;
+        this._connectionsProxy = null;
         super.destroy();
     }
 });
