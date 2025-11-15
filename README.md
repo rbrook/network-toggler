@@ -14,9 +14,9 @@ A GNOME Shell extension that provides quick WiFi network switching with geolocat
 
 ## Configuration
 
-The extension reads configurations from `~/.networks.yaml` with four sections: networks, countries, IPs, and asn_orgs.
+The extension reads configurations from `toggler.config.yaml` in the extension directory with four sections: networks, countries, IPs, and asn_orgs.
 
-Example `~/.networks.yaml` file:
+Example `toggler.config.yaml` file:
 ```yaml
 networks:
   HomeWiFi: cyan
@@ -99,7 +99,7 @@ gnome-extensions list --enabled | grep network-toggler
 
 1. **Extension not appearing**: Ensure GNOME Shell version is 46-49 and extension is enabled
 2. **Networks not switching**: Verify NetworkManager is running and `nmcli` command works
-3. **Colors not showing**: Check `~/.networks.yaml` file format and YAML syntax
+3. **Colors not showing**: Check `toggler.config.yaml` file format and YAML syntax in the extension directory
 4. **Geolocation not updating**: Verify internet connectivity and ifconfig.co accessibility
 5. **Menu not responding**: Try disabling and re-enabling the extension
 6. **IPv6 parsing issues**: Use quotes around IPv6 addresses in the IPs section

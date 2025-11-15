@@ -1,0 +1,18 @@
+networks:
+  HomeWiFi: cyan
+  OfficeNetwork: orange
+  CafeWiFi: blue
+  #DisabledNetwork: red
+
+countries:
+  US: orange
+  DE: blue
+  JP: green
+
+IPs:
+  "2001:db8:85a3::8a2e:370:7334": green
+  192.168.1.100: yellow
+
+asn_orgs:
+  "Example Telecommunications Corp": purple
+  "Global Internet Provider Ltd": orange

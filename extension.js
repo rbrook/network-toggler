@@ -40,11 +40,17 @@ function fetchLocationInfo() {
     return false;
 }
 
-function loadNetworkConfigs() {
-    console.log('Loading network configs from ~/.networks.yaml');
+function loadNetworkConfigs(extensionDir = null) {
+    let filePath;
+    if (extensionDir) {
+        filePath = extensionDir + '/toggler.config.yaml';
+        console.log('Loading network configs from extension directory');
+    } else {
+        filePath = GLib.get_home_dir() + '/toggler.config.yaml';
+        console.log('Loading network configs from ~/toggler.config.yaml');
+    }
+    console.log(`Attempting to read: ${filePath}`);
     try {
-        let filePath = GLib.get_home_dir() + '/.networks.yaml';
-        console.log(`Attempting to read: ${filePath}`);
         let file = Gio.File.new_for_path(filePath);
         let [ok, data] = file.load_contents(null);
         console.log('File read result:', ok);
@@ -141,10 +147,11 @@ function loadNetworkConfigs() {
 
 const NetworkToggle = GObject.registerClass(
 class NetworkToggle extends PanelMenu.Button {
-    _init() {
+    _init(extensionDir = null) {
         super._init(0.0, "Network Toggle");
 
-        loadNetworkConfigs();
+        this.extensionDir = extensionDir;
+        loadNetworkConfigs(extensionDir);
 
         this.label = new St.Label({
             text: "🛜 WiFi",
@@ -266,7 +273,7 @@ class NetworkToggle extends PanelMenu.Button {
                     // Reload configuration and fetch new location info after network change
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
                         console.log('Network changed - reloading configuration');
-                        loadNetworkConfigs();
+                        loadNetworkConfigs(this.extensionDir);
                         this._createMenu(); // Update menu with new config
                         fetchLocationInfo();
                         this._updateLabel();
@@ -331,7 +338,7 @@ class NetworkToggle extends PanelMenu.Button {
 
 export default class NetToggleExtension extends Extension {
     enable() {
-        this.networkToggle = new NetworkToggle();
+        this.networkToggle = new NetworkToggle(this.dir.get_path());
         Main.panel.addToStatusArea('net-toggle', this.networkToggle, 1, 'right');
     }
 
