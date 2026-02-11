@@ -1,0 +1,11 @@
+#!/bin/bash
+# Toggle WireGuard 'nl' connection
+
+# Check if interface exists (indicates connection is up)
+if ip link show nl &>/dev/null; then
+    echo "WireGuard 'nl' is UP, bringing it down..."
+    sudo wg-quick down nl
+else
+    echo "WireGuard 'nl' is DOWN, bringing it up..."
+    sudo wg-quick up nl
+fi

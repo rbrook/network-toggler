@@ -36,6 +36,9 @@ function fetchLocationInfo() {
         }
     } catch (e) {
         console.log('Location info fetch failed:', e);
+        currentCountryCode = "";
+        currentIP = "";
+        currentAsnOrg = "";
     }
     return false;
 }
@@ -160,6 +163,7 @@ class NetworkToggle extends PanelMenu.Button {
         this.add_child(this.label);
 
         this._lastKnownNetwork = "WiFi";
+        this._connectionType = 'wifi';
         
         // Initial location fetch
         fetchLocationInfo();
@@ -172,25 +176,58 @@ class NetworkToggle extends PanelMenu.Button {
     }
     
     _getCurrentNetwork() {
+        // Check for active WiFi first
         try {
             let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f active,ssid dev wifi');
             if (ok) {
                 let activeLine = out.toString().split('\n').find(line => line.startsWith('yes:'));
                 if (activeLine) {
                     let network = activeLine.substring(4).trim();
-                    this._lastKnownNetwork = network;
-                    return network;
+                    if (network) {
+                        this._lastKnownNetwork = network;
+                        this._connectionType = 'wifi';
+                        return network;
+                    }
                 }
             }
         } catch (e) {}
-        return this._lastKnownNetwork;
+
+        // Check for active ethernet connection
+        try {
+            let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f device,type,state dev');
+            if (ok) {
+                let lines = out.toString().split('\n');
+                for (let line of lines) {
+                    let parts = line.split(':');
+                    if (parts.length >= 3 && parts[1] === 'ethernet' && parts[2] === 'connected') {
+                        let device = parts[0].trim();
+                        this._lastKnownNetwork = device;
+                        this._connectionType = 'ethernet';
+                        return device;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // No connection
+        this._connectionType = 'disconnected';
+        return null;
     }
     
     _updateLabel() {
         let current = this._getCurrentNetwork();
+
+        // Disconnected state — show broken chain only
+        if (this._connectionType === 'disconnected') {
+            this.label.clutter_text.set_markup(`<span alpha="50%">⛓\u200D💥</span>`);
+            this.label.set_style(`font-weight: bold;`);
+            return;
+        }
+
         let networkColor = networkConfigs.get(current) || "white";
         let textPart = current || "WiFi";
-        
+        let icon = this._connectionType === 'ethernet' ? '🔌' : '🛜';
+
         // Build location part with individual colors
         let locationPart = "";
         if (currentCountryCode && currentAsnOrg && currentIP) {
@@ -198,57 +235,61 @@ class NetworkToggle extends PanelMenu.Button {
             let asnOrgColor = asnOrgConfigs.get(currentAsnOrg) || "white";
             let ipColor = ipConfigs.get(currentIP) || "white";
             let asnOrgFirstWord = currentAsnOrg.split(/[\s-]+/)[0];
-            
+
             // Abbreviate IPv6 addresses for the widget display only
             let displayIP = currentIP;
             if (currentIP.includes(':') && currentIP.length > 15) {
                 let lastPart = currentIP.split(':').pop();
                 displayIP = `...${lastPart}`;
             }
-            
+
             locationPart = `<span color="${countryColor}">${currentCountryCode}</span> | <span color="${asnOrgColor}">${asnOrgFirstWord}</span> | <span color="${ipColor}">${displayIP}</span> `;
         } else if (currentCountryCode && currentIP) {
             let countryColor = countryConfigs.get(currentCountryCode) || "white";
             let ipColor = ipConfigs.get(currentIP) || "white";
-            
+
             // Abbreviate IPv6 addresses for the widget display only
             let displayIP = currentIP;
             if (currentIP.includes(':') && currentIP.length > 15) {
                 let lastPart = currentIP.split(':').pop();
                 displayIP = `...${lastPart}`;
             }
-            
+
             locationPart = `<span color="${countryColor}">${currentCountryCode}</span> | <span color="${ipColor}">${displayIP}</span> `;
         } else if (currentCountryCode) {
             let countryColor = countryConfigs.get(currentCountryCode) || "white";
             locationPart = `<span color="${countryColor}">${currentCountryCode}</span> `;
         } else if (currentIP) {
             let ipColor = ipConfigs.get(currentIP) || "white";
-            
+
             // Abbreviate IPv6 addresses for the widget display only
             let displayIP = currentIP;
             if (currentIP.includes(':') && currentIP.length > 15) {
                 let lastPart = currentIP.split(':').pop();
                 displayIP = `...${lastPart}`;
             }
-            
+
             locationPart = `<span color="${ipColor}">${displayIP}</span> `;
         }
-        
-        let markup = `${locationPart}<span alpha="50%">🛜</span> <span color="${networkColor}">${textPart}</span>`;
+
+        let markup = `${locationPart}<span alpha="50%">${icon}</span> <span color="${networkColor}">${textPart}</span>`;
         this.label.clutter_text.set_markup(markup);
         this.label.set_style(`font-weight: bold;`);
     }
     
     _getFullConnectionInfo() {
         let current = this._getCurrentNetwork();
+
+        if (this._connectionType === 'disconnected') {
+            return 'Disconnected';
+        }
+
         let parts = [];
-        
         if (currentCountryCode) parts.push(currentCountryCode);
         if (currentAsnOrg) parts.push(currentAsnOrg);
         if (currentIP) parts.push(currentIP);
         parts.push(current || "WiFi");
-        
+
         return parts.join(' • ');
     }
     

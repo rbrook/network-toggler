@@ -4,7 +4,8 @@ A GNOME Shell extension that provides quick WiFi network switching with geolocat
 
 ## Features
 
-- **Geolocation Widget**: Shows country code, ISP provider, IP address (abbreviated IPv6), and current WiFi network
+- **Geolocation Widget**: Shows country code, ISP provider, IP address (abbreviated IPv6), and current network name
+- **Connection Type Detection**: Automatically detects WiFi (🛜), ethernet (🔌), or disconnected (⛓️‍💥) states
 - **Color-Coded Display**: Each element (country, ISP, IP, network) displays in predefined colors for easy identification
 - **Smart Dropdown**: First line shows full connection details (non-clickable), followed by clickable network options
 - **One-Click Toggle**: Left-click to cycle through networks sequentially
@@ -86,7 +87,9 @@ gnome-extensions list --enabled | grep network-toggler
 
 ## How It Works
 
-- **Widget Display**: Shows `Country | ISP | IP | Network` with wireless icon, each element colored per YAML config
+- **Widget Display**: Shows `Country | ISP | IP | Network` with connection-type icon (🛜 WiFi, 🔌 ethernet, ⛓️‍💥 disconnected), each element colored per YAML config
+- **Ethernet Support**: When WiFi is off but ethernet is connected, displays the ethernet device name (e.g. `enp3s0`) with geolocation info
+- **Disconnected State**: When all network interfaces are down, shows only the disconnected icon with no stale data
 - **IPv6 Abbreviation**: Long IPv6 addresses shown as `...last4` in widget (full IP in dropdown)
 - **Smart Dropdown**: First line shows full connection details (non-clickable), separator, then clickable networks
 - **Left Click**: Cycles through networks in order they appear in YAML networks section
@@ -104,9 +107,41 @@ gnome-extensions list --enabled | grep network-toggler
 5. **Menu not responding**: Try disabling and re-enabling the extension
 6. **IPv6 parsing issues**: Use quotes around IPv6 addresses in the IPs section
 
+## Passwordless WireGuard Commands
+
+To allow `wg-quick` commands without password prompts:
+
+```bash
+# Edit sudoers (use visudo for safety)
+sudo visudo
+
+# Add this line:
+username ALL=(ALL) NOPASSWD: /usr/bin/wg-quick
+
+# Or create separate file in /etc/sudoers.d/
+echo "username ALL=(ALL) NOPASSWD: /usr/bin/wg-quick" | sudo tee /etc/sudoers.d/wireguard
+
+# Verify configuration
+sudo -l | grep wg-quick
+```
+
+Replace `username` with your actual username.
+
+## WireGuard Toggle Script (wgnl)
+
+The `wgnl` script toggles the WireGuard 'nl' connection on/off. Checks current interface status and runs `sudo wg-quick up nl` or `sudo wg-quick down nl` accordingly.
+
+**Installation**: Add project directory to PATH in `~/.bashrc`:
+```bash
+export PATH="$HOME/projects/network-toggler:$PATH"
+```
+
+Requires passwordless sudo for wg-quick (see section above).
+
 ## Files Structure
 
 - `extension.js` - Main extension logic and UI components
 - `metadata.json` - Extension metadata and GNOME Shell version compatibility
 - `styles.css` - CSS styling for color themes
+- `wgnl` - WireGuard 'nl' toggle script (see WireGuard section above)
 - `README.md` - This documentation file
