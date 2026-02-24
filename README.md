@@ -88,15 +88,41 @@ gnome-extensions list --enabled | grep network-toggler
 ## How It Works
 
 - **Widget Display**: Shows `Country | ISP | IP | Network` with connection-type icon (🛜 WiFi, 🔌 ethernet, ⛓️‍💥 disconnected), each element colored per YAML config
-- **Ethernet Support**: When WiFi is off but ethernet is connected, displays the ethernet device name (e.g. `enp3s0`) with geolocation info
+- **Ethernet Priority**: Ethernet is always checked first and takes priority over WiFi when both are connected
 - **Disconnected State**: When all network interfaces are down, shows only the disconnected icon with no stale data
 - **IPv6 Abbreviation**: Long IPv6 addresses shown as `...last4` in widget (full IP in dropdown)
 - **Smart Dropdown**: First line shows full connection details (non-clickable), separator, then clickable networks
 - **Left Click**: Cycles through networks in order they appear in YAML networks section
 - **Menu Click**: Directly connects to selected network
-- **Network Detection**: Uses NetworkManager D-Bus signals to detect network changes
-- **Geolocation Updates**: Fetches location data from ifconfig.co/json on network changes
 - **Command Execution**: Uses `nmcli con up "NetworkName"` to switch networks
+
+## Architecture
+
+### Async Subprocess Model
+
+All subprocess calls (`nmcli`, `curl`) use a `spawnAsync()` wrapper around `Gio.Subprocess.communicate_utf8_async()`. This prevents GNOME Shell from freezing during network queries. The main thread never blocks — results are delivered via Promise resolution.
+
+`curl` is called with `--max-time 5` to bound the geolocation fetch time.
+
+### D-Bus Network Monitoring
+
+Two complementary signals are monitored on the NetworkManager D-Bus proxy:
+
+**`g-properties-changed` → `ActiveConnections`** — fires whenever a connection is added to or removed from the active connection list. This is the primary trigger for ethernet ↔ WiFi transitions. Crucially, when ethernet drops and WiFi picks up instantly, NetworkManager's global state stays at "connected" the whole time, so `StateChanged` never fires. `ActiveConnections` always changes in this case.
+
+**`g-signal` → `StateChanged` / `DeviceAdded` / `DeviceRemoved`** — catches broader state transitions: full disconnects, device hotplug events. Also triggers a delayed (3s) config reload and geolocation refresh.
+
+A separate proxy on `org.freedesktop.NetworkManager.Settings` monitors `NewConnection` / `ConnectionRemoved` for VPN-style profile changes.
+
+### UI Update Sequencing
+
+`_updateLabel()` always runs before `_createMenu()` (awaited sequentially) to avoid a race condition where both independently call `_getCurrentNetwork()` and mutate shared state (`_connectionType`, `_lastKnownNetwork`).
+
+`_createMenu()` fetches all data before calling `menu.removeAll()`, so the old menu stays visible until the new one is ready — preventing a brief empty-menu flash during async operations.
+
+### Destroyed Widget Guard
+
+`this._destroyed` is set in `destroy()` and checked at every async suspension point in `_updateLabel()`, `_createMenu()`, and all `.then()` callbacks. This prevents in-flight promises (e.g. a curl request still running when the extension is disabled) from attempting to update destroyed Clutter actors.
 
 ## Troubleshooting
 

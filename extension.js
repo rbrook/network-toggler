@@ -185,9 +185,13 @@ class NetworkToggle extends PanelMenu.Button {
         this._lastKnownNetwork = "WiFi";
         this._connectionType = 'wifi';
 
+        this._destroyed = false;
+
         // Initial async setup
-        fetchLocationInfo().then(() => {
-            this._updateLabel();
+        fetchLocationInfo().then(async () => {
+            if (this._destroyed) return;
+            await this._updateLabel();
+            if (this._destroyed) return;
             this._createMenu();
         });
 
@@ -196,21 +200,7 @@ class NetworkToggle extends PanelMenu.Button {
     }
     
     async _getCurrentNetwork() {
-        // Check for active WiFi first
-        try {
-            let out = await spawnAsync(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']);
-            let activeLine = out.split('\n').find(line => line.startsWith('yes:'));
-            if (activeLine) {
-                let network = activeLine.substring(4).trim();
-                if (network) {
-                    this._lastKnownNetwork = network;
-                    this._connectionType = 'wifi';
-                    return network;
-                }
-            }
-        } catch (e) {}
-
-        // Check for active ethernet connection
+        // Check for active ethernet first (wired always takes priority)
         try {
             let out = await spawnAsync(['nmcli', '-t', '-f', 'device,type,state', 'dev']);
             let lines = out.split('\n');
@@ -225,13 +215,29 @@ class NetworkToggle extends PanelMenu.Button {
             }
         } catch (e) {}
 
+        // Check for active WiFi
+        try {
+            let out = await spawnAsync(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']);
+            let activeLine = out.split('\n').find(line => line.startsWith('yes:'));
+            if (activeLine) {
+                let network = activeLine.substring(4).trim();
+                if (network) {
+                    this._lastKnownNetwork = network;
+                    this._connectionType = 'wifi';
+                    return network;
+                }
+            }
+        } catch (e) {}
+
         // No connection
         this._connectionType = 'disconnected';
         return null;
     }
     
     async _updateLabel() {
+        if (this._destroyed) return;
         let current = await this._getCurrentNetwork();
+        if (this._destroyed) return;
 
         // Disconnected state — show broken chain only
         if (this._connectionType === 'disconnected') {
@@ -321,6 +327,18 @@ class NetworkToggle extends PanelMenu.Button {
                 null
             );
             
+            this._propertiesChangedId = this._nmProxy.connect('g-properties-changed', (proxy, changed) => {
+                let keys = Object.keys(changed.recursiveUnpack ? changed.recursiveUnpack() : {});
+                if (keys.includes('ActiveConnections')) {
+                    console.log('ActiveConnections changed - updating label');
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+                        if (this._destroyed) return false;
+                        this._updateLabel();
+                        return false;
+                    });
+                }
+            });
+
             this._stateChangedId = this._nmProxy.connect('g-signal', (proxy, sender, signal, params) => {
                 if (signal === 'StateChanged' || signal === 'DeviceAdded' || signal === 'DeviceRemoved') {
                     console.log(`Network event detected: ${signal}`);
@@ -332,8 +350,10 @@ class NetworkToggle extends PanelMenu.Button {
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
                         console.log('Network changed - reloading configuration and geolocation');
                         loadNetworkConfigs(this.extensionDir);
-                        fetchLocationInfo().then(() => {
-                            this._updateLabel();
+                        fetchLocationInfo().then(async () => {
+                            if (this._destroyed) return;
+                            await this._updateLabel();
+                            if (this._destroyed) return;
                             this._createMenu();
                         });
                         return false;
@@ -374,15 +394,20 @@ class NetworkToggle extends PanelMenu.Button {
     }
     
     async _createMenu() {
+        if (this._destroyed) return;
+
+        // Build all menu items BEFORE clearing, so menu is never visibly empty
+        let connectionInfo = await this._getFullConnectionInfo();
+        if (this._destroyed) return;
+
         this.menu.removeAll();
 
         // Add connection info as first non-clickable item
-        let connectionInfo = await this._getFullConnectionInfo();
         let infoItem = new PopupMenu.PopupMenuItem(connectionInfo);
         infoItem.label.set_style(`color: lightgray; font-size: 14px; font-weight: normal;`);
         infoItem.setSensitive(false);
         this.menu.addMenuItem(infoItem);
-        
+
         if (networkNames.length === 0) {
             // No networks configured - show informational message
             let item = new PopupMenu.PopupMenuItem("No networks configured");
@@ -391,19 +416,19 @@ class NetworkToggle extends PanelMenu.Button {
             this.menu.addMenuItem(item);
             return;
         }
-        
+
         // Add separator
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        
+
         for (let network of networkNames) {
             let item = new PopupMenu.PopupMenuItem(network);
             let color = networkConfigs.get(network) || "white";
             item.label.set_style(`color: ${color}; font-size: 16px; font-weight: bold;`);
-            
+
             item.connect('activate', () => {
                 this._switchToNetwork(network);
             });
-            
+
             this.menu.addMenuItem(item);
         }
     }
@@ -415,6 +440,10 @@ class NetworkToggle extends PanelMenu.Button {
     }
     
     destroy() {
+        this._destroyed = true;
+        if (this._nmProxy && this._propertiesChangedId) {
+            this._nmProxy.disconnect(this._propertiesChangedId);
+        }
         if (this._nmProxy && this._stateChangedId) {
             this._nmProxy.disconnect(this._stateChangedId);
         }
