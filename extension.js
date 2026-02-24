@@ -17,23 +17,43 @@ let currentCountryCode = "";
 let currentIP = "";
 let currentAsnOrg = "";
 
-function fetchLocationInfo() {
+function spawnAsync(argv) {
+    return new Promise((resolve, reject) => {
+        try {
+            let proc = new Gio.Subprocess({
+                argv: argv,
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            });
+            proc.init(null);
+            proc.communicate_utf8_async(null, null, (proc, res) => {
+                try {
+                    let [, stdout] = proc.communicate_utf8_finish(res);
+                    resolve(stdout || '');
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+async function fetchLocationInfo() {
     console.log('Fetching location info...');
     try {
-        let [ok, out] = GLib.spawn_command_line_sync('curl -s ifconfig.co/json');
-        if (ok) {
-            let jsonData = JSON.parse(out.toString().trim());
-            let newCountry = jsonData.country_iso || "";
-            let newIP = jsonData.ip || "";
-            let newAsnOrg = jsonData.asn_org || "";
-            
-            console.log(`Location update: ${currentCountryCode}->${newCountry}, ${currentIP}->${newIP}, ${currentAsnOrg}->${newAsnOrg}`);
-            
-            currentCountryCode = newCountry;
-            currentIP = newIP;
-            currentAsnOrg = newAsnOrg;
-            return true;
-        }
+        let out = await spawnAsync(['curl', '-s', '--max-time', '5', 'ifconfig.co/json']);
+        let jsonData = JSON.parse(out.trim());
+        let newCountry = jsonData.country_iso || "";
+        let newIP = jsonData.ip || "";
+        let newAsnOrg = jsonData.asn_org || "";
+
+        console.log(`Location update: ${currentCountryCode}->${newCountry}, ${currentIP}->${newIP}, ${currentAsnOrg}->${newAsnOrg}`);
+
+        currentCountryCode = newCountry;
+        currentIP = newIP;
+        currentAsnOrg = newAsnOrg;
+        return true;
     } catch (e) {
         console.log('Location info fetch failed:', e);
         currentCountryCode = "";
@@ -164,47 +184,43 @@ class NetworkToggle extends PanelMenu.Button {
 
         this._lastKnownNetwork = "WiFi";
         this._connectionType = 'wifi';
-        
-        // Initial location fetch
-        fetchLocationInfo();
-        
-        this._updateLabel();
-        this._createMenu();
-        
+
+        // Initial async setup
+        fetchLocationInfo().then(() => {
+            this._updateLabel();
+            this._createMenu();
+        });
+
         // Watch for network changes via D-Bus
         this._setupNetworkWatcher();
     }
     
-    _getCurrentNetwork() {
+    async _getCurrentNetwork() {
         // Check for active WiFi first
         try {
-            let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f active,ssid dev wifi');
-            if (ok) {
-                let activeLine = out.toString().split('\n').find(line => line.startsWith('yes:'));
-                if (activeLine) {
-                    let network = activeLine.substring(4).trim();
-                    if (network) {
-                        this._lastKnownNetwork = network;
-                        this._connectionType = 'wifi';
-                        return network;
-                    }
+            let out = await spawnAsync(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']);
+            let activeLine = out.split('\n').find(line => line.startsWith('yes:'));
+            if (activeLine) {
+                let network = activeLine.substring(4).trim();
+                if (network) {
+                    this._lastKnownNetwork = network;
+                    this._connectionType = 'wifi';
+                    return network;
                 }
             }
         } catch (e) {}
 
         // Check for active ethernet connection
         try {
-            let [ok, out] = GLib.spawn_command_line_sync('nmcli -t -f device,type,state dev');
-            if (ok) {
-                let lines = out.toString().split('\n');
-                for (let line of lines) {
-                    let parts = line.split(':');
-                    if (parts.length >= 3 && parts[1] === 'ethernet' && parts[2] === 'connected') {
-                        let device = parts[0].trim();
-                        this._lastKnownNetwork = device;
-                        this._connectionType = 'ethernet';
-                        return device;
-                    }
+            let out = await spawnAsync(['nmcli', '-t', '-f', 'device,type,state', 'dev']);
+            let lines = out.split('\n');
+            for (let line of lines) {
+                let parts = line.split(':');
+                if (parts.length >= 3 && parts[1] === 'ethernet' && parts[2] === 'connected') {
+                    let device = parts[0].trim();
+                    this._lastKnownNetwork = device;
+                    this._connectionType = 'ethernet';
+                    return device;
                 }
             }
         } catch (e) {}
@@ -214,8 +230,8 @@ class NetworkToggle extends PanelMenu.Button {
         return null;
     }
     
-    _updateLabel() {
-        let current = this._getCurrentNetwork();
+    async _updateLabel() {
+        let current = await this._getCurrentNetwork();
 
         // Disconnected state — show broken chain only
         if (this._connectionType === 'disconnected') {
@@ -277,8 +293,8 @@ class NetworkToggle extends PanelMenu.Button {
         this.label.set_style(`font-weight: bold;`);
     }
     
-    _getFullConnectionInfo() {
-        let current = this._getCurrentNetwork();
+    async _getFullConnectionInfo() {
+        let current = await this._getCurrentNetwork();
 
         if (this._connectionType === 'disconnected') {
             return 'Disconnected';
@@ -316,9 +332,10 @@ class NetworkToggle extends PanelMenu.Button {
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
                         console.log('Network changed - reloading configuration and geolocation');
                         loadNetworkConfigs(this.extensionDir);
-                        this._createMenu(); // Update menu with new config
-                        fetchLocationInfo();
-                        this._updateLabel();
+                        fetchLocationInfo().then(() => {
+                            this._updateLabel();
+                            this._createMenu();
+                        });
                         return false;
                     });
                 }
@@ -341,8 +358,9 @@ class NetworkToggle extends PanelMenu.Button {
                         console.log(`Connection event detected: ${signal}`);
                         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
                             console.log('Connection changed - updating geolocation');
-                            fetchLocationInfo();
-                            this._updateLabel();
+                            fetchLocationInfo().then(() => {
+                                this._updateLabel();
+                            });
                             return false;
                         });
                     }
@@ -355,11 +373,11 @@ class NetworkToggle extends PanelMenu.Button {
         }
     }
     
-    _createMenu() {
+    async _createMenu() {
         this.menu.removeAll();
-        
+
         // Add connection info as first non-clickable item
-        let connectionInfo = this._getFullConnectionInfo();
+        let connectionInfo = await this._getFullConnectionInfo();
         let infoItem = new PopupMenu.PopupMenuItem(connectionInfo);
         infoItem.label.set_style(`color: lightgray; font-size: 14px; font-weight: normal;`);
         infoItem.setSensitive(false);
